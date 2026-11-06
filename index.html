@@ -307,7 +307,7 @@ const DEFAULT_RULES = {
   "GoDaddy": ["domaincontrol.com", "secureserver.net"],
   "ZA Webmail Resellers": ["webmail.co.za"]
 };
-const CLOUD_PROVIDERS = new Set(["Microsoft 365 / Outlook","Google Workspace / Gmail","Yahoo Mail","GoDaddy","Mimecast","Proofpoint","Barracuda","Zoho Mail","Proton Mail","Rackspace Email","Namecheap Private Email","Cloudflare Email Routing","Fastmail","Titan Email","Apple iCloud Mail"]);
+const CLOUD_PROVIDERS = new Set(["Microsoft 365 / Outlook","Google Workspace / Gmail","Yahoo Mail","GoDaddy","Mimecast","Proofpoint","Barracuda","Zoho Mail","Proton Mail","Rackspace Email","Namecheap Private Email","Cloudflare Email Routing","Fastmail","Titan Email","Apple iCloud Mail","Gmail (personal)","Google Workspace (custom domain)"]);
 const SELF_HOSTED_LABEL = "cPanel / Self-Hosted Webmail";
 
 let rules = (()=>{ try{ const s = JSON.parse(localStorage.getItem('hostSorterRules')); if(s && typeof s==='object') return s; }catch(e){} return JSON.parse(JSON.stringify(DEFAULT_RULES)); })();
@@ -615,7 +615,7 @@ document.getElementById('sortBtn').addEventListener('click', async ()=>{
     const hint = FAST_HINTS[domain];
     if(hint){
       const hp = matchRules(hint);
-      if(hp){ domainResult[domain] = { provider: hp, failed: false, mx: [], method: 'Known domain' }; return; }
+      if(hp){ domainResult[domain] = { provider: splitGoogle(hp, domain), failed: false, mx: [], method: 'Known domain' }; return; }
     }
     const [ns, mx] = await Promise.all([resolveDNS(domain,'NS'), resolveDNS(domain,'MX')]);
     if(ns === null && mx === null){
@@ -632,6 +632,7 @@ document.getElementById('sortBtn').addEventListener('click', async ()=>{
       const txt = await resolveDNS(domain,'TXT');
       [provider, method] = classify(domain, ns||[], mx||[], txt||[]);
     }
+    provider = splitGoogle(provider, domain);
     let webmail = '';
     if(opt('optWebmail') && !CLOUD_PROVIDERS.has(provider)) webmail = await gate(()=>probeWebmail(domain));
     domainResult[domain] = { provider, failed: false, mx: mxh, method, webmail };
@@ -885,7 +886,7 @@ const TYPOS = {
 const DISPOSABLE = new Set(['mailinator.com','guerrillamail.com','guerrillamail.net','guerrillamail.org','guerrillamail.biz','guerrillamail.de','grr.la','sharklasers.com','10minutemail.com','tempmail.com','temp-mail.org','tempmailo.com','yopmail.com','trashmail.com','throwawaymail.com','getnada.com','maildrop.cc','dispostable.com','fakeinbox.com','mintemail.com','mohmal.com','emailondeck.com','spamgourmet.com','tempinbox.com','mailnesia.com','burnermail.io','moakt.com','discard.email','mytemp.email','inboxkitten.com','mailcatch.com','spambox.us','trbvm.com']);
 const ROLES = new Set(['info','admin','administrator','support','sales','contact','hello','noreply','no-reply','donotreply','do-not-reply','postmaster','webmaster','abuse','billing','office','enquiries','enquiry','help','marketing','hr','accounts','team','mail','service','newsletter','careers','jobs','orders','security']);
 const GROUPS = {
-  'Big providers': ['Microsoft 365 / Outlook','Google Workspace / Gmail','Yahoo Mail','Apple iCloud Mail'],
+  'Big providers': ['Microsoft 365 / Outlook','Google Workspace / Gmail','Gmail (personal)','Google Workspace (custom domain)','Yahoo Mail','Apple iCloud Mail'],
   'Gateways': ['Mimecast','Proofpoint','Barracuda'],
   'Privacy and other mail services': ['Proton Mail','Zoho Mail','Fastmail','Titan Email','Rackspace Email','Namecheap Private Email','Cloudflare Email Routing'],
   'Validity issues': ['Typos (fix suggested)','Disposable domains','Role addresses'],
@@ -896,6 +897,11 @@ function groupOf(name){
   if(base.startsWith('⚠')) return 'Validity issues';
   for(const [g, list] of Object.entries(GROUPS)) if(list.includes(base)) return g;
   return 'Hosting providers';
+}
+const PERSONAL_GOOGLE = new Set(['gmail.com','googlemail.com']);
+function splitGoogle(provider, domain){  // @gmail.com apart from custom domains hosted on Google Workspace
+  if(!provider || provider !== matchRules('gmail-smtp-in.l.google.com')) return provider;
+  return PERSONAL_GOOGLE.has(domain) ? 'Gmail (personal)' : 'Google Workspace (custom domain)';
 }
 function tagWeb(name, info){ return (info && info.webmail) ? `${name} · ${info.webmail}` : name; }
 let probeActive = 0; const probeQ = [];
