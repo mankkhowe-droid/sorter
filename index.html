@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Host Sorter — Email Domain Classifier</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #0b0f0d;
+    --panel: #111613;
+    --panel-2: #161c19;
+    --line: #232b27;
+    --text: #e7ede9;
+    --muted: #7d8f86;
+    --accent: #5ee6a8;
+    --accent-dim: #1f4e3b;
+    --amber: #e6b45e;
+    --amber-dim: #5c4a2a;
+    --red: #e6786d;
+    --blue: #6fb1e6;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --r: 8px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    font-size:13.5px; line-height:1.5;
+  }
+  .app{max-width:1280px; margin:0 auto; padding:16px 18px 40px;}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:6px 2px 16px; border-bottom:1px solid var(--line); margin-bottom:16px;}
+  .brand{display:flex; align-items:center; gap:9px;}
+  .brand-dot{width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent);}
+  .brand-name{font-weight:700; font-size:15px; letter-spacing:-.01em;}
+  .brand-sub{color:var(--muted); font-size:11.5px; font-family:var(--mono);}
+
+  .layout{display:grid; grid-template-columns:300px 1fr; gap:16px; align-items:start;}
+  @media (max-width:880px){ .layout{grid-template-columns:1fr;} }
+
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:14px;}
+  .panel + .panel{margin-top:14px;}
+  .panel-title{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; font-weight:700;}
+
+  textarea{
+    width:100%; min-height:130px; resize:vertical; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:7px; color:var(--text);
+    font-family:var(--mono); font-size:12px; padding:9px; outline:none;
+  }
+  textarea:focus{border-color:var(--accent-dim);}
+  #filterInput,#splitN,#probeUrl{background:var(--panel-2); border:1px solid var(--line); border-radius:6px; color:var(--text); font-size:12px; padding:6px 10px; outline:none; width:170px;}
+  button.copy-one{padding:5px 11px; font-size:11px;}
+
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:9px;}
+  .row.tight{margin-top:6px;}
+  input[type=file]{font-size:11px; color:var(--muted); max-width:100%;}
+
+  button{
+    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+    border-radius:6px; border:1px solid transparent; padding:8px 13px;
+    transition: transform .06s ease, opacity .15s ease, border-color .15s ease;
+    white-space:nowrap;
+  }
+  button:active{transform:scale(.97);}
+  button.primary{background:var(--accent); color:#06120d; flex:1;}
+  button.primary:hover{opacity:.9;}
+  button.ghost{background:transparent; border-color:var(--line); color:var(--text);}
+  button.ghost:hover{border-color:var(--accent-dim);}
+  button.sm{padding:6px 10px; font-size:11.5px;}
+  button:disabled{opacity:.35; cursor:not-allowed;}
+
+  .mini-stats{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;}
+  .mini-stat{background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:8px 10px;}
+  .mini-stat b{display:block; font-size:17px; font-family:var(--mono);}
+  .mini-stat span{color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;}
+
+  .progress-wrap{display:none; margin-top:12px;}
+  .progress-label{display:flex; justify-content:space-between; font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-bottom:5px;}
+  .progress-label span:last-child{color:var(--accent);}
+  .progress-outer{height:6px; background:var(--panel-2); border-radius:4px; overflow:hidden;}
+  .progress-inner{height:100%; width:0%; background:var(--accent); transition:width .2s ease; box-shadow:0 0 6px var(--accent);}
+
+  .tabs{display:flex; gap:4px; margin-bottom:12px; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:3px; width:max-content;}
+  .tab-btn{
+    background:transparent; border:none; color:var(--muted); font-size:12px; font-weight:600;
+    padding:6px 14px; border-radius:6px; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--accent); color:#06120d;}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+
+  .results-total{margin-left:auto; color:var(--muted); font-family:var(--mono); font-size:11.5px;}
+
+  .folders{display:flex; flex-direction:column; gap:10px;}
+  .folder{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:7px; overflow:hidden;
+  }
+  .folder-top{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:11px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap;}
+  .folder-name{font-weight:700; font-size:13px;}
+  .folder-count{font-family:var(--mono); font-size:11px; color:var(--accent); background:rgba(94,230,168,.1); border:1px solid var(--accent-dim); padding:1px 8px; border-radius:20px; white-space:nowrap;}
+  .folder.unclassified .folder-count{color:var(--amber); border-color:var(--amber-dim); background:rgba(230,180,94,.08);}
+  .folder.failed .folder-count{color:var(--red); border-color:#5c2f29; background:rgba(230,120,109,.08);}
+  .folder.cloud .folder-count{color:var(--blue); border-color:#2a4a5c; background:rgba(111,177,230,.08);}
+  .folder-top-actions{display:flex; align-items:center; gap:10px; margin-left:auto;}
+  .folder-list{
+    font-family:var(--mono); font-size:11px; color:var(--muted);
+    padding:12px 14px; columns:3 200px; column-gap:18px;
+  }
+  .folder-list div{padding:2px 0; break-inside:avoid; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  button.download-one{padding:5px 11px; font-size:11px;}
+
+  .analytics-stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px;}
+  @media (max-width:700px){ .analytics-stats{grid-template-columns:1fr 1fr;} }
+  .astat{background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:12px 14px;}
+  .astat b{display:block; font-size:22px; font-family:var(--mono);}
+  .astat span{color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;}
+
+  .analytics-section-title{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; font-weight:700;}
+  .bar-chart{display:flex; flex-direction:column; gap:8px; margin-bottom:22px;}
+  .bar-row{display:grid; grid-template-columns:170px 1fr 44px; align-items:center; gap:10px;}
+  .bar-label{font-size:11.5px; font-family:var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .bar-track{background:var(--panel-2); border:1px solid var(--line); border-radius:4px; height:14px; overflow:hidden;}
+  .bar-fill{height:100%; background:var(--accent);}
+  .bar-fill.amber{background:var(--amber);}
+  .bar-fill.red{background:var(--red);}
+  .bar-fill.blue{background:var(--blue);}
+  .bar-val{font-family:var(--mono); font-size:11px; color:var(--muted); text-align:right;}
+
+  .donut-wrap{display:flex; align-items:center; gap:26px; flex-wrap:wrap;}
+  .donut{width:150px; height:150px; border-radius:50%; flex:0 0 auto;}
+  .donut-legend{display:flex; flex-direction:column; gap:8px;}
+  .legend-item{display:flex; align-items:center; gap:8px; font-size:12px;}
+  .legend-swatch{width:10px; height:10px; border-radius:3px; flex:0 0 auto;}
+  .legend-item b{font-family:var(--mono); margin-left:auto; padding-left:14px;}
+
+  .empty{color:var(--muted); font-size:12.5px; padding:24px 10px; text-align:center; border:1px dashed var(--line); border-radius:7px;}
+
+  .history-list{display:flex; flex-direction:column; gap:6px;}
+  .history-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:8px 12px;
+  }
+  .history-meta{font-family:var(--mono); font-size:11px; color:var(--muted);}
+  .history-meta b{color:var(--text); font-weight:600;}
+  .history-actions{display:flex; gap:6px;}
+
+  .rules-list{display:flex; flex-direction:column; gap:6px;}
+  .rule-row{display:flex; gap:8px; align-items:center; background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:7px 9px;}
+  .rule-row input.rname{
+    background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-weight:700; font-size:11.5px; outline:none; width:150px; flex:0 0 auto;
+  }
+  .rule-row input.rsubs{
+    background:transparent; border:none; color:var(--text); font-family:var(--mono); font-size:11.5px; outline:none; flex:1;
+  }
+  .rule-row .del{color:var(--red); background:transparent; border:none; cursor:pointer; font-size:14px; padding:2px 6px;}
+  .rule-note{color:var(--muted); font-size:11.5px; margin-bottom:10px; line-height:1.5;}
+  .rule-note b{color:var(--text);}
+
+  footer{margin-top:18px; color:var(--muted); font-size:11px; font-family:var(--mono);}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div>
+        <div class="brand-name">Host Sorter</div>
+        <div class="brand-sub">email → mail provider classifier</div>
+      </div>
+    </div>
+    <div class="brand-sub" id="topStat"></div>
+  </div>
+
+  <div class="layout">
+
+    <!-- LEFT: input + controls -->
+    <div>
+      <div class="panel">
+        <div class="panel-title">Input</div>
+        <textarea id="emailInput" placeholder="jane@example.co.za
+sipho@another-domain.co.za
+paste a messy list — valid addresses are extracted automatically"></textarea>
+        <div class="row tight">
+          <input type="file" id="fileInput" accept=".txt,.csv,.tsv,.xlsx,.xlsm,.xlsb,.xls,.xltx,.ods,.fods,.numbers,.zip,.json,.eml,.vcf,.html,.htm,.xml,.log" multiple>
+        </div>
+        <div class="row tight" id="fileStatusRow" style="display:none;"><span class="brand-sub" id="fileStatus"></span></div>
+        <div class="row">
+          <button class="primary" id="sortBtn">Sort emails</button>
+          <button class="ghost sm" id="clearBtn">Clear input</button>
+          <button class="ghost sm" id="stopBtn" style="display:none;">Stop</button>
+        </div>
+
+        <div class="row tight" style="font-size:12px;opacity:.85;flex-wrap:wrap;gap:6px 14px;">
+          <label><input type="checkbox" id="optNoMx" checked> Flag invalid / no-MX domains</label>
+          <label><input type="checkbox" id="optTypos" checked> Separate typos</label>
+          <label><input type="checkbox" id="optDisposable" checked> Separate disposable</label>
+          <label><input type="checkbox" id="optRole" checked> Separate role addresses</label>
+          <label><input type="checkbox" id="optPlus"> Strip +tags &amp; Gmail dots (dedupe)</label>
+          <label><input type="checkbox" id="optTld"> Split folders by country (TLD)</label>
+          <label><input type="checkbox" id="optGroups"> Group exports (Big providers / Gateways / Hosts…)</label>
+          <label><input type="checkbox" id="optWebmail"> Detect webmail platform (OWA, Roundcube, WebAccess…)</label>
+          <input type="text" id="probeUrl" value="/api/webmail-probe" title="URL of the webmail probe (/api/webmail-probe on Vercel, or the full address of webmail-probe.php)">
+          <button class="ghost sm" id="clearCacheBtn">Clear DNS cache</button>
+        </div>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-label"><span id="progressStatus">Resolving domains…</span><span id="progressPct">0%</span></div>
+          <div class="progress-outer"><div class="progress-inner" id="progressInner"></div></div>
+        </div>
+
+        <div class="mini-stats" id="miniStats" style="display:none;">
+          <div class="mini-stat"><b id="statEmails">0</b><span>Emails</span></div>
+          <div class="mini-stat"><b id="statDomains">0</b><span>Domains</span></div>
+          <div class="mini-stat"><b id="statHosts">0</b><span>Matched</span></div>
+          <div class="mini-stat"><b id="statUnclass">0</b><span>Unclassified</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: tabs -->
+    <div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="results">Results</button>
+        <button class="tab-btn" data-tab="analytics">Analytics</button>
+        <button class="tab-btn" data-tab="history">History</button>
+        <button class="tab-btn" data-tab="rules">Rules</button>
+      </div>
+
+      <div class="panel tab-panel active" id="tab-results">
+        <div class="row tight" style="margin-top:0; margin-bottom:10px;">
+          <button class="ghost sm" id="downloadAllBtn" disabled>Download all as ZIP</button>
+          <button class="ghost sm" id="downloadCsvBtn" disabled>Export CSV</button>
+          <button class="ghost sm" id="downloadXlsxBtn" disabled>Export Excel</button>
+          <input type="number" id="splitN" min="0" placeholder="Split ZIP files every N" style="width:150px;">
+          <button class="ghost sm" id="clearResultsBtn" disabled>Clear results</button>
+          <input type="search" id="filterInput" placeholder="Filter emails…">
+          <span class="results-total" id="resultsTotal"></span>
+        </div>
+        <div id="folders"><div class="empty">No results yet. Paste emails on the left and click Sort.</div></div>
+      </div>
+
+      <div class="panel tab-panel" id="tab-analytics">
+        <div id="analyticsBody"><div class="empty">No data yet. Sort a batch of emails to see the breakdown.</div></div>
+      </div>
+
+      <div class="panel tab-panel" id="tab-history">
+        <div class="row tight" style="margin-top:0; margin-bottom:10px;">
+          <button class="ghost sm" id="clearHistoryBtn">Clear all history</button>
+        </div>
+        <div class="history-list" id="historyList"><div class="empty">No previous sorts saved yet — completed sorts save here automatically.</div></div>
+      </div>
+
+      <div class="panel tab-panel" id="tab-rules">
+        <div class="rule-note">
+          Matched by substrings in each domain's live records, checked in this order: <b>MX</b>, then <b>NS</b>, then self-hosting, then <b>SPF</b> (finds the real provider behind Mimecast/Proofpoint-style filters). Within a pass, the first provider in this list wins. Edits are saved in this browser. Wrap a pattern in slashes for regex, e.g. <b>/^mail\./</b>. <b>Office 365, Google Workspace, Yahoo</b> and <b>GoDaddy</b> have strong, reliable DNS signatures. <b>cPanel-powered / Roundcube webmail</b> can't be fingerprinted from DNS alone (they're software running on top of any mail server) — that bucket instead catches domains whose mail routes back to their own domain, i.e. self-hosted mail, which covers most cPanel/Roundcube setups and generic ZA webmail resellers.
+        </div>
+        <div class="rules-list" id="rulesList"></div>
+        <div class="row">
+          <button class="ghost sm" id="addRuleBtn">+ Add provider</button>
+          <button class="ghost sm" id="resetRulesBtn">Reset to defaults</button>
+          <button class="ghost sm" id="exportRulesBtn">Export rules</button>
+          <button class="ghost sm" id="importRulesBtn">Import rules</button>
+          <input type="file" id="importRulesFile" accept=".json" style="display:none;">
+          <input type="text" id="testDomain" placeholder="test a domain…" style="background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:12px;padding:6px 10px;width:150px;">
+          <button class="ghost sm" id="testRuleBtn">Test</button> <span class="brand-sub" id="testResult"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>DNS resolved via Google &amp; Cloudflare public DoH resolvers, client-side. Nothing is sent to a server other than the DNS lookups themselves.</footer>
+</div>
+
+<script>
+const DEFAULT_RULES = {
+  "Xneelo": ["xneelo", "host-h.net", "hostingsa"],
+  "Domains.co.za": ["domains.co.za"],
+  "telaHosting": ["telahosting", "tela.co.za"],
+  "Hostking": ["hostking"],
+  "Elitehost": ["elitehost"],
+  "1-grid": ["1grid", "1-grid"],
+  "MWeb Group": ["mweb.co.za", "iafrica.com", "icon.co.za", "netactive.co.za", "worldonline.co.za", "tiscali.co.za"],
+  "Afrihost": ["afrihost"],
+  "Hetzner SA": ["hetzner"],
+  "Web Africa": ["webafrica", "wa.co.za"],
+  "Axxess": ["axxess"],
+  "Vox Telecom": ["vox.co.za", "voxtelecom"],
+  "Internet Solutions": ["is.co.za", "isnsza", "isznet"],
+  "Telkom": ["telkomsa.net", "saix.net", "telkom.co.za"],
+  "Mimecast": ["mimecast.com", "mimecast.co.za"],
+  "Proofpoint": ["pphosted.com", "ppe-hosted.com"],
+  "Barracuda": ["barracudanetworks.com", "barracudanetworks.net"],
+  "Microsoft 365 / Outlook": ["protection.outlook.com", "outlook.com"],
+  "Google Workspace / Gmail": ["google.com", "googlemail.com", "psmtp.com"],
+  "Zoho Mail": ["zoho.com", "zoho.eu", "zoho.in"],
+  "Proton Mail": ["protonmail.ch", "proton.me"],
+  "Rackspace Email": ["emailsrvr.com"],
+  "Namecheap Private Email": ["privateemail.com"],
+  "Cloudflare Email Routing": ["mx.cloudflare.net"],
+  "Fastmail": ["messagingengine.com"],
+  "Titan Email": ["titan.email"],
+  "Yahoo Mail": ["yahoodns.net", "yahoo.com"],
+  "Apple iCloud Mail": ["icloud.com"],
+  "GoDaddy": ["domaincontrol.com", "secureserver.net"],
+  "ZA Webmail Resellers": ["webmail.co.za"]
+};
+const CLOUD_PROVIDERS = new Set(["Microsoft 365 / Outlook","Google Workspace / Gmail","Yahoo Mail","GoDaddy","Mimecast","Proofpoint","Barracuda","Zoho Mail","Proton Mail","Rackspace Email","Namecheap Private Email","Cloudflare Email Routing","Fastmail","Titan Email","Apple iCloud Mail"]);
+const SELF_HOSTED_LABEL = "cPanel / Self-Hosted Webmail";
+
+let rules = (()=>{ try{ const s = JSON.parse(localStorage.getItem('hostSorterRules')); if(s && typeof s==='object') return s; }catch(e){} return JSON.parse(JSON.stringify(DEFAULT_RULES)); })();
+function saveRules(){ try{ localStorage.setItem('hostSorterRules', JSON.stringify(rules)); }catch(e){} }
+const esc = s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let lastGroups = {};
+let lastDomainInfo = {};
+let firstRender = true;
+
+// ---------- Rules editor ----------
+const rulesList = document.getElementById('rulesList');
+function renderRules(){
+  if(!firstRender) saveRules();
+  firstRender = false;
+  rulesList.innerHTML = '';
+  Object.keys(rules).forEach(name=>{
+    const row = document.createElement('div');
+    row.className = 'rule-row';
+    row.innerHTML = `
+      <input class="rname" data-old="${esc(name)}" value="${esc(name)}">
+      <input class="rsubs" data-provider="${esc(name)}" value="${esc(rules[name].join(', '))}">
+      <button class="del" data-provider="${name}" title="Remove">✕</button>
+    `;
+    rulesList.appendChild(row);
+  });
+  rulesList.querySelectorAll('input.rsubs').forEach(inp=>{
+    inp.addEventListener('change', e=>{
+      const p = e.target.dataset.provider;
+      rules[p] = e.target.value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+      saveRules();
+    });
+  });
+  rulesList.querySelectorAll('input.rname').forEach(inp=>{
+    inp.addEventListener('change', e=>{
+      const oldName = e.target.dataset.old;
+      const newName = e.target.value.trim();
+      if(!newName || newName === oldName) { e.target.value = oldName; return; }
+      const ordered = {};
+      Object.keys(rules).forEach(k=>{ ordered[k === oldName ? newName : k] = rules[k]; });
+      rules = ordered;
+      renderRules();
+    });
+  });
+  rulesList.querySelectorAll('.del').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      delete rules[e.target.dataset.provider];
+      renderRules();
+    });
+  });
+}
+document.getElementById('addRuleBtn').addEventListener('click', ()=>{
+  let name = 'New Provider', i = 2;
+  while(rules[name]) { name = 'New Provider ' + i++; }
+  rules[name] = [];
+  renderRules();
+});
+renderRules();
+
+// ---------- Tabs ----------
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ---------- Input handling ----------
+const fileEmails = new Set();
+const failedFiles = [];
+const EXCEL_EXT = /\.(xlsx|xlsm|xlsb|xls|xltx|xltm|ods|fods|numbers)$/i;
+const SKIP_EXT = /\.(png|jpe?g|gif|webp|pdf|exe|dll|docx?|pptx?|mp[34]|mov)$/i;
+function addFound(text){ for(const e of extractEmails(text)) fileEmails.add(e); }
+function decodeText(buf){
+  let enc = 'utf-8';
+  if(buf.byteLength > 1){
+    const u = new Uint8Array(buf, 0, 2);
+    if(u[0] === 0xFF && u[1] === 0xFE) enc = 'utf-16le';
+    else if(u[0] === 0xFE && u[1] === 0xFF) enc = 'utf-16be';
+  }
+  return new TextDecoder(enc).decode(buf);
+}
+async function handleFile(name, buf, depth=0){
+  if(depth > 4 || /(^|\/)(__MACOSX\/|\.DS_Store)/.test(name)) return;
+  if(/\.zip$/i.test(name)){
+    const zip = await JSZip.loadAsync(buf);
+    const entries = Object.values(zip.files).filter(f=>!f.dir);
+    await runPool(entries, async f=>{
+      try{ await handleFile(f.name, await f.async('arraybuffer'), depth+1); }
+      catch(e){ failedFiles.push(f.name); }
+    }, 4, ()=>{});
+    return;
+  }
+  if(EXCEL_EXT.test(name)){
+    const wb = XLSX.read(buf, {type:'array', bookVBA:false});
+    for(const sn of wb.SheetNames){
+      const ws = wb.Sheets[sn];
+      addFound(XLSX.utils.sheet_to_csv(ws));
+      for(const k in ws){ const c = ws[k]; if(c && c.l && c.l.Target) addFound(String(c.l.Target).replace(/^mailto:/i,'')); }
+    }
+    return;
+  }
+  if(SKIP_EXT.test(name)) return;
+  addFound(decodeText(buf));
+}
+function updateFileStatus(msg){
+  const row = document.getElementById('fileStatusRow');
+  row.style.display = (fileEmails.size || failedFiles.length || msg) ? 'flex' : 'none';
+  document.getElementById('fileStatus').textContent = msg ||
+    `${fileEmails.size.toLocaleString()} emails loaded from files` +
+    (failedFiles.length ? ` · ${failedFiles.length} unreadable (${failedFiles.slice(0,3).join(', ')})` : '');
+}
+async function loadFiles(files){
+  files = [...files]; if(!files.length) return;
+  stopFlag = false;
+  let done = 0;
+  await runPool(files, async f=>{
+    try{ await handleFile(f.name, await f.arrayBuffer()); }catch(e){ failedFiles.push(f.name); }
+    updateFileStatus(`Reading files… ${++done}/${files.length} · ${fileEmails.size.toLocaleString()} emails found`);
+  }, 3, ()=>{});
+  updateFileStatus();
+}
+document.getElementById('fileInput').addEventListener('change', e=>{ loadFiles(e.target.files); e.target.value = ''; });
+const dropTa = document.getElementById('emailInput');
+dropTa.addEventListener('dragover', e=>e.preventDefault());
+dropTa.addEventListener('drop', e=>{ if(e.dataTransfer.files.length){ e.preventDefault(); loadFiles(e.dataTransfer.files); } });
+
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  document.getElementById('emailInput').value = '';
+  fileEmails.clear(); failedFiles.length = 0; updateFileStatus();
+});
+
+function clearResultsView(){
+  document.getElementById('folders').innerHTML = '<div class="empty">No results yet. Paste emails on the left and click Sort.</div>';
+  document.getElementById('analyticsBody').innerHTML = '<div class="empty">No data yet. Sort a batch of emails to see the breakdown.</div>';
+  document.getElementById('resultsTotal').textContent = '';
+  document.getElementById('downloadAllBtn').disabled = true;
+  document.getElementById('downloadCsvBtn').disabled = true;
+  document.getElementById('downloadXlsxBtn').disabled = true;
+  document.getElementById('clearResultsBtn').disabled = true;
+  document.getElementById('miniStats').style.display = 'none';
+  document.getElementById('topStat').textContent = '';
+  lastGroups = {};
+}
+document.getElementById('clearResultsBtn').addEventListener('click', clearResultsView);
+
+const LOC = new Uint8Array(128), DOM = new Uint8Array(128);
+for(const c of 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'){ LOC[c.charCodeAt(0)] = DOM[c.charCodeAt(0)] = 1; }
+for(const c of '._%+-') LOC[c.charCodeAt(0)] = 1;
+for(const c of '.-') DOM[c.charCodeAt(0)] = 1;
+function extractEmails(raw){
+  const out = new Set();
+  let at = raw.indexOf('@');
+  while(at !== -1){
+    let st = at;  while(st > 0 && raw.charCodeAt(st-1) < 128 && LOC[raw.charCodeAt(st-1)]) st--;
+    let en = at+1; while(en < raw.length && raw.charCodeAt(en) < 128 && DOM[raw.charCodeAt(en)]) en++;
+    if(st < at && en > at+1){
+      const dom = raw.slice(at+1, en).replace(/[.-]+$/,'');
+      if(/^[a-zA-Z0-9.-]*[a-zA-Z0-9]\.[a-zA-Z]{2,}$/.test(dom)) out.add((raw.slice(st, at) + '@' + dom).toLowerCase());
+    }
+    at = raw.indexOf('@', Math.max(en, at+1));
+  }
+  return [...out];
+}
+
+// ---------- DNS ----------
+const dnsCache = new Map();
+async function resolveDNS(domain, type){
+  const key = type + ':' + domain;
+  if(dnsCache.has(key)) return dnsCache.get(key);
+  const hit = await idbGet(key);
+  if(hit && Date.now() - hit.t < 864e5){ const o = hit.v; o.nx = hit.nx; dnsCache.set(key, o); return o; }
+  const endpoints = [
+    `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=${type}`,
+    `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=${type}`
+  ];
+  for(let attempt=0; attempt<2; attempt++){
+    for(const url of endpoints){
+      const ctl = new AbortController();
+      const timer = setTimeout(()=>ctl.abort(), 7000);
+      try{
+        const res = await fetch(url, { headers:{'accept':'application/dns-json'}, signal: ctl.signal });
+        if(res.status === 429){ await new Promise(r=>setTimeout(r, 700*(attempt+1))); continue; }
+        if(!res.ok) continue;
+        const data = await res.json();
+        const out = data.Answer ? data.Answer.map(a=>String(a.data).toLowerCase()) : [];
+        out.nx = data.Status === 3;
+        dnsCache.set(key, out);
+        idbSet(key, { t: Date.now(), v: [...out], nx: out.nx });
+        return out;
+      }catch(err){ /* try next endpoint */ }
+      finally{ clearTimeout(timer); }
+    }
+  }
+  return null;
+}
+function mxHostname(raw){
+  // MX answer data is "priority hostname." — strip priority and trailing dot
+  const parts = raw.trim().split(/\s+/);
+  return (parts[parts.length-1] || '').replace(/\.$/,'');
+}
+let idbP;
+function idb(){
+  return idbP ||= new Promise(res=>{
+    try{
+      const r = indexedDB.open('mailSorterDns', 1);
+      r.onupgradeneeded = ()=>r.result.createObjectStore('d');
+      r.onsuccess = ()=>res(r.result);
+      r.onerror = ()=>res(null);
+    }catch(e){ res(null); }
+  });
+}
+async function idbGet(k){
+  const db = await idb(); if(!db) return null;
+  return new Promise(res=>{ try{ const q = db.transaction('d').objectStore('d').get(k); q.onsuccess = ()=>res(q.result || null); q.onerror = ()=>res(null); }catch(e){ res(null); } });
+}
+function idbSet(k, v){ idb().then(db=>{ try{ if(db) db.transaction('d','readwrite').objectStore('d').put(v, k); }catch(e){} }); }
+const reCache = new Map();
+function ruleHit(s, text){
+  if(!s) return false;
+  const end = s.lastIndexOf('/');
+  if(s.length > 2 && s[0] === '/' && end > 0){
+    try{
+      if(!reCache.has(s)) reCache.set(s, new RegExp(s.slice(1,end), s.slice(end+1) || 'i'));
+      return reCache.get(s).test(text);
+    }catch(e){ return false; }
+  }
+  return text.includes(s);
+}
+function matchRules(text){
+  for(const [provider, subs] of Object.entries(rules)){
+    if(subs.some(s => ruleHit(s, text))) return provider;
+  }
+  return null;
+}
+// Priority: MX (where mail really goes) > NS > self-hosted MX > SPF (finds providers behind a filter)
+function classify(domain, ns, mx, txt){
+  let p = matchRules(mx.join(' ')); if(p) return [p, 'MX'];
+  p = matchRules(ns.join(' ')); if(p) return [p, 'NS'];
+  if(mx.some(m => mxHostname(m).endsWith(domain))) return [SELF_HOSTED_LABEL, 'Self-hosted MX'];
+  p = matchRules(txt.filter(t => t.includes('v=spf1')).join(' '));
+  return p ? [p, 'SPF'] : [null, ''];
+}
+function baseHost(h){
+  const p = h.split('.').filter(Boolean);
+  if(p.length < 2) return h;
+  const n = (p.length > 2 && /^(co|com|org|net|ac|gov|edu)$/.test(p[p.length-2])) ? 3 : 2;
+  return p.slice(-n).join('.');
+}
+
+async function runPool(items, worker, concurrency, onProgress){
+  let i = 0, done = 0;
+  async function next(){
+    while(i < items.length && !stopFlag){
+      const idx = i++;
+      await worker(items[idx], idx);
+      done++;
+      onProgress(done, items.length);
+    }
+  }
+  const runners = Array.from({length: Math.min(concurrency, items.length)}, next);
+  await Promise.all(runners);
+}
+
+document.getElementById('sortBtn').addEventListener('click', async ()=>{
+  const raw = document.getElementById('emailInput').value;
+  let emails = [...new Set([...extractEmails(raw), ...fileEmails])];
+  if(opt('optPlus')) emails = [...new Set(emails.map(normalizeEmail))];
+  const progressWrap = document.getElementById('progressWrap');
+  const progressInner = document.getElementById('progressInner');
+  const progressStatus = document.getElementById('progressStatus');
+  const progressPct = document.getElementById('progressPct');
+  const sortBtn = document.getElementById('sortBtn');
+  const topStat = document.getElementById('topStat');
+
+  if(emails.length === 0){
+    topStat.textContent = 'No valid email addresses found';
+    return;
+  }
+
+  sortBtn.disabled = true;
+  stopFlag = false; document.getElementById('stopBtn').style.display = '';
+  document.getElementById('clearResultsBtn').disabled = true;
+  progressWrap.style.display = 'block';
+  progressInner.style.width = '0%';
+  progressPct.textContent = '0%';
+  progressStatus.textContent = 'Resolving domains…';
+  topStat.textContent = `${emails.length} emails found`;
+
+  const domainMap = {};
+  const special = {};
+  lastMeta = {};
+  emails.forEach(e=>{
+    const [local, domain] = e.split('@');
+    if(opt('optTypos') && TYPOS[domain]){ (special['Typos (fix suggested)'] ||= []).push(e); lastMeta[e] = '→ ' + local + '@' + TYPOS[domain]; return; }
+    if(opt('optDisposable') && DISPOSABLE.has(domain)){ (special['Disposable domains'] ||= []).push(e); return; }
+    if(opt('optRole') && ROLES.has(local.replace(/\+.*$/,''))){ (special['Role addresses'] ||= []).push(e); return; }
+    (domainMap[domain] ||= []).push(e);
+  });
+  const domains = Object.keys(domainMap);
+
+  const domainResult = {};
+  await runPool(domains, async (domain)=>{
+    const hint = FAST_HINTS[domain];
+    if(hint){
+      const hp = matchRules(hint);
+      if(hp){ domainResult[domain] = { provider: hp, failed: false, mx: [], method: 'Known domain' }; return; }
+    }
+    const [ns, mx] = await Promise.all([resolveDNS(domain,'NS'), resolveDNS(domain,'MX')]);
+    if(ns === null && mx === null){
+      domainResult[domain] = { provider: null, failed: true, mx: [], method: '' };
+      return;
+    }
+    const mxh = (mx||[]).map(mxHostname);
+    if(opt('optNoMx') && mx){
+      if(mx.nx){ domainResult[domain] = { provider: '⚠ Invalid domain (NXDOMAIN)', failed: false, mx: [], method: 'DNS check' }; return; }
+      if(!mxh.some(Boolean)){ domainResult[domain] = { provider: '⚠ No MX record', failed: false, mx: [], method: 'DNS check' }; return; }
+    }
+    let [provider, method] = classify(domain, ns||[], mx||[], []);
+    if(!provider){  // SPF lookup only when MX/NS gave no answer
+      const txt = await resolveDNS(domain,'TXT');
+      [provider, method] = classify(domain, ns||[], mx||[], txt||[]);
+    }
+    let webmail = '';
+    if(opt('optWebmail') && !CLOUD_PROVIDERS.has(provider)) webmail = await gate(()=>probeWebmail(domain));
+    domainResult[domain] = { provider, failed: false, mx: mxh, method, webmail };
+  }, 24, (done,total)=>{
+    const pct = Math.round(done/total*100);
+    progressInner.style.width = pct + '%';
+    progressPct.textContent = pct + '%';
+    progressStatus.textContent = `Resolving domains… (${done}/${total})`;
+  });
+
+  const groups = {};
+  let failedCount = 0, unclassifiedCount = 0;
+  domains.forEach(domain=>{
+    const info = domainResult[domain] || { provider: 'Not checked (stopped)', failed: false, mx: [], method: '' };
+    const list = domainMap[domain];
+    if(info.failed){
+      addAll(groups, 'Lookup failed', list);
+      failedCount += list.length;
+    } else if(info.provider){
+      addAll(groups, tagTld(tagWeb(info.provider, info), domain), list);
+    } else {
+      addAll(groups, tagWeb('Unclassified', info), list);
+      unclassifiedCount += list.length;
+    }
+  });
+
+  for(const [k, v] of Object.entries(special)) addAll(groups, k, v);
+  lastGroups = groups;
+  lastDomainInfo = domainResult;
+  progressWrap.style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'none';
+  sortBtn.disabled = false;
+
+  const hostCount = Object.keys(groups).filter(g=>g!=='Unclassified'&&g!=='Lookup failed').length;
+  topStat.textContent = `${emails.length} emails · ${domains.length} domains · ${hostCount} providers matched`;
+
+  document.getElementById('statEmails').textContent = emails.length;
+  document.getElementById('statDomains').textContent = domains.length;
+  document.getElementById('statHosts').textContent = hostCount;
+  document.getElementById('statUnclass').textContent = unclassifiedCount;
+  document.getElementById('miniStats').style.display = 'grid';
+
+  renderFolders(groups);
+  renderAnalytics(groups);
+  const hasResults = Object.keys(groups).length > 0;
+  document.getElementById('downloadAllBtn').disabled = !hasResults;
+  document.getElementById('downloadCsvBtn').disabled = !hasResults;
+  document.getElementById('downloadXlsxBtn').disabled = !hasResults;
+  document.getElementById('clearResultsBtn').disabled = !hasResults;
+
+  if(hasResults){
+    saveHistoryEntry({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      timestamp: Date.now(),
+      emailCount: emails.length,
+      domainCount: domains.length,
+      hostCount,
+      groups
+    });
+  }
+});
+
+function slugify(s){ return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
+
+function renderFolders(groups, q=''){
+  const foldersEl = document.getElementById('folders');
+  const special = ['Unclassified','Lookup failed'];
+  const names = Object.keys(groups).sort((a,b)=>{
+    if(special.includes(a) && !special.includes(b)) return 1;
+    if(special.includes(b) && !special.includes(a)) return -1;
+    return groups[b].length - groups[a].length;
+  });
+
+  const totalEmails = Object.values(groups).reduce((s,l)=>s+l.length,0);
+  document.getElementById('resultsTotal').textContent = names.length ? `${totalEmails} emails across ${names.length} folders` : '';
+
+  if(names.length === 0){
+    foldersEl.innerHTML = '<div class="empty">No results yet.</div>';
+    return;
+  }
+
+  foldersEl.innerHTML = '';
+  names.forEach(name=>{
+    const list = groups[name];
+    const view = q ? list.filter(e=>e.includes(q)) : list;
+    if(q && !view.length) return;
+    const card = document.createElement('div');
+    let cls = 'folder';
+    if(name==='Unclassified') cls += ' unclassified';
+    else if(name==='Lookup failed') cls += ' failed';
+    else if(CLOUD_PROVIDERS.has(name)) cls += ' cloud';
+    card.className = cls;
+    card.innerHTML = `
+      <div class="folder-top">
+        <div class="folder-name">${esc(name)}.txt</div>
+        <div class="folder-count">${list.length} email${list.length===1?'':'s'}</div>
+        <div class="folder-top-actions">
+          <button class="ghost copy-one" data-name="${esc(name)}">Copy</button>
+          <button class="ghost download-one" data-name="${esc(name)}">Download .txt</button>
+        </div>
+      </div>
+      <div class="folder-list">${view.slice(0,CAP).map(e=>`<div>${e}</div>`).join('')}${view.length>CAP?`<div>…and ${(view.length-CAP).toLocaleString()} more (use Copy / Download / CSV for all)</div>`:''}</div>
+    `;
+    foldersEl.appendChild(card);
+  });
+
+  foldersEl.querySelectorAll('.download-one').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const name = btn.dataset.name;
+      downloadText(slugify(name) + '.txt', groups[name].join('\n'));
+    });
+  });
+  foldersEl.querySelectorAll('.copy-one').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(groups[btn.dataset.name].join('\n'));
+        btn.textContent = 'Copied'; setTimeout(()=>btn.textContent = 'Copy', 1200);
+      }catch(e){}
+    });
+  });
+}
+
+function renderAnalytics(groups){
+  const el = document.getElementById('analyticsBody');
+  const names = Object.keys(groups);
+  if(names.length === 0){
+    el.innerHTML = '<div class="empty">No data yet. Sort a batch of emails to see the breakdown.</div>';
+    return;
+  }
+
+  const totalEmails = Object.values(groups).reduce((s,l)=>s+l.length,0);
+  const failedCount = (groups['Lookup failed']||[]).length;
+  const unclassCount = (groups['Unclassified']||[]).length;
+  const matchedCount = totalEmails - failedCount - unclassCount;
+  const providerCount = names.filter(n=>n!=='Unclassified'&&n!=='Lookup failed').length;
+  const coveragePct = totalEmails ? Math.round((matchedCount/totalEmails)*100) : 0;
+
+  const sorted = names.slice().sort((a,b)=>groups[b].length-groups[a].length);
+  const maxCount = Math.max(...names.map(n=>groups[n].length));
+
+  const barsHtml = sorted.map(name=>{
+    const count = groups[name].length;
+    const pct = Math.round((count/maxCount)*100);
+    let fillCls = '';
+    if(name==='Unclassified') fillCls = 'amber';
+    else if(name==='Lookup failed') fillCls = 'red';
+    else if(CLOUD_PROVIDERS.has(name)) fillCls = 'blue';
+    return `
+      <div class="bar-row">
+        <div class="bar-label" title="${esc(name)}">${esc(name)}</div>
+        <div class="bar-track"><div class="bar-fill ${fillCls}" style="width:${pct}%"></div></div>
+        <div class="bar-val">${count}</div>
+      </div>`;
+  }).join('');
+
+  const donutParts = [
+    { label: 'Matched', value: matchedCount, color: 'var(--accent)' },
+    { label: 'Unclassified', value: unclassCount, color: 'var(--amber)' },
+    { label: 'Lookup failed', value: failedCount, color: 'var(--red)' }
+  ].filter(p=>p.value>0);
+  let acc = 0;
+  const gradientStops = donutParts.map(p=>{
+    const start = (acc/totalEmails)*360;
+    acc += p.value;
+    const end = (acc/totalEmails)*360;
+    return `${p.color} ${start}deg ${end}deg`;
+  }).join(', ');
+
+  const hostCounts = {};
+  Object.values(lastDomainInfo).forEach(info=>{
+    if(info.provider || info.failed) return;
+    new Set(info.mx.map(baseHost)).forEach(h=>{ if(h) hostCounts[h] = (hostCounts[h]||0) + 1; });
+  });
+  const topHosts = Object.entries(hostCounts).sort((a,b)=>b[1]-a[1]).slice(0,14);
+  const unclassHtml = topHosts.length ? `
+    <div class="analytics-section-title" style="margin-top:22px">Unclassified: most common MX hosts (click to make a rule)</div>
+    <div class="row tight">${topHosts.map(([h,c])=>`<button class="ghost sm add-rule" data-host="${esc(h)}">${esc(h)} · ${c}</button>`).join('')}</div>` : '';
+
+  el.innerHTML = `
+    <div class="analytics-stats">
+      <div class="astat"><b>${totalEmails}</b><span>Total emails</span></div>
+      <div class="astat"><b>${providerCount}</b><span>Providers matched</span></div>
+      <div class="astat"><b>${coveragePct}%</b><span>Coverage</span></div>
+      <div class="astat"><b>${unclassCount + failedCount}</b><span>Needs review</span></div>
+    </div>
+
+    <div class="analytics-section-title">Emails by provider</div>
+    <div class="bar-chart">${barsHtml}</div>
+
+    <div class="analytics-section-title">Classification split</div>
+    <div class="donut-wrap">
+      <div class="donut" style="background:conic-gradient(${gradientStops})"></div>
+      <div class="donut-legend">
+        ${donutParts.map(p=>`
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:${p.color}"></div>
+            ${p.label}
+            <b>${p.value} · ${Math.round((p.value/totalEmails)*100)}%</b>
+          </div>`).join('')}
+      </div>
+    </div>
+    ${unclassHtml}
+  `;
+  el.querySelectorAll('.add-rule').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      let name = 'New Provider', i = 2;
+      while(rules[name]) name = 'New Provider ' + i++;
+      rules[name] = [btn.dataset.host];
+      renderRules();
+      document.querySelector('.tab-btn[data-tab="rules"]').click();
+    });
+  });
+}
+
+function downloadText(filename, content){
+  const blob = new Blob([content], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('downloadAllBtn').addEventListener('click', async ()=>{
+  if(Object.keys(lastGroups).length === 0) return;
+  const zip = new JSZip();
+  Object.entries(lastGroups).forEach(([name, list])=>{
+    const n = parseInt(document.getElementById('splitN').value) || 0;
+    const dir = opt('optGroups') ? slugify(groupOf(name)) + '/' : '';
+    if(n > 0 && list.length > n){
+      for(let o = 0, part = 1; o < list.length; o += n, part++) zip.file(`${dir}${slugify(name)}_part${part}.txt`, list.slice(o, o+n).join('\n'));
+    } else zip.file(dir + slugify(name) + '.txt', list.join('\n'));
+  });
+  const blob = await zip.generateAsync({type:'blob'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'sorted-emails.zip';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// ---------- Extras ----------
+let stopFlag = false, lastMeta = {};
+const opt = id => document.getElementById(id).checked;
+const TYPOS = {
+  'gmial.com':'gmail.com','gmai.com':'gmail.com','gamil.com':'gmail.com','gmal.com':'gmail.com','gmil.com':'gmail.com','gnail.com':'gmail.com','gmaill.com':'gmail.com','gmail.co':'gmail.com','gmail.con':'gmail.com','gmail.comm':'gmail.com','gmail.cm':'gmail.com',
+  'hotmial.com':'hotmail.com','hotmal.com':'hotmail.com','hotmai.com':'hotmail.com','hotmail.con':'hotmail.com','hotmail.co':'hotmail.com',
+  'yaho.com':'yahoo.com','yahooo.com':'yahoo.com','yahoo.con':'yahoo.com','yahoo.co':'yahoo.com','yhoo.com':'yahoo.com',
+  'outlok.com':'outlook.com','outloo.com':'outlook.com','outlook.con':'outlook.com','iclould.com':'icloud.com','icloud.con':'icloud.com'
+};
+const DISPOSABLE = new Set(['mailinator.com','guerrillamail.com','guerrillamail.net','guerrillamail.org','guerrillamail.biz','guerrillamail.de','grr.la','sharklasers.com','10minutemail.com','tempmail.com','temp-mail.org','tempmailo.com','yopmail.com','trashmail.com','throwawaymail.com','getnada.com','maildrop.cc','dispostable.com','fakeinbox.com','mintemail.com','mohmal.com','emailondeck.com','spamgourmet.com','tempinbox.com','mailnesia.com','burnermail.io','moakt.com','discard.email','mytemp.email','inboxkitten.com','mailcatch.com','spambox.us','trbvm.com']);
+const ROLES = new Set(['info','admin','administrator','support','sales','contact','hello','noreply','no-reply','donotreply','do-not-reply','postmaster','webmaster','abuse','billing','office','enquiries','enquiry','help','marketing','hr','accounts','team','mail','service','newsletter','careers','jobs','orders','security']);
+const GROUPS = {
+  'Big providers': ['Microsoft 365 / Outlook','Google Workspace / Gmail','Yahoo Mail','Apple iCloud Mail'],
+  'Gateways': ['Mimecast','Proofpoint','Barracuda'],
+  'Privacy and other mail services': ['Proton Mail','Zoho Mail','Fastmail','Titan Email','Rackspace Email','Namecheap Private Email','Cloudflare Email Routing'],
+  'Validity issues': ['Typos (fix suggested)','Disposable domains','Role addresses'],
+  'Unsorted': ['Unclassified','Lookup failed','Not checked (stopped)']
+};
+function groupOf(name){
+  const base = name.replace(/ \[(?:[a-z]{2}|intl)\]$/,'').replace(/ · .*$/,'');
+  if(base.startsWith('⚠')) return 'Validity issues';
+  for(const [g, list] of Object.entries(GROUPS)) if(list.includes(base)) return g;
+  return 'Hosting providers';
+}
+function tagWeb(name, info){ return (info && info.webmail) ? `${name} · ${info.webmail}` : name; }
+let probeActive = 0; const probeQ = [];
+function gate(fn){  // at most 6 probes hit the PHP helper at once
+  return new Promise((res, rej)=>{
+    const run = ()=>{ probeActive++; fn().then(res, rej).finally(()=>{ probeActive--; const n = probeQ.shift(); if(n) n(); }); };
+    probeActive < 6 ? run() : probeQ.push(run);
+  });
+}
+async function probeWebmail(domain){
+  const base = document.getElementById('probeUrl').value.trim() || 'webmail-probe.php';
+  const key = 'W:' + domain;
+  const hit = await idbGet(key);
+  if(hit && Date.now() - hit.t < 6048e5) return hit.v;
+  try{
+    const ctl = new AbortController(), t = setTimeout(()=>ctl.abort(), 25000);
+    const r = await fetch(base + (base.includes('?') ? '&' : '?') + 'd=' + encodeURIComponent(domain), { signal: ctl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    if(j.error) return '';
+    idbSet(key, { t: Date.now(), v: j.platform || '' });
+    return j.platform || '';
+  }catch(e){ return ''; }
+}
+function tagTld(name, domain){
+  if(!opt('optTld')) return name;
+  const cc = domain.split('.').pop();
+  return `${name} [${cc.length === 2 ? cc : 'intl'}]`;
+}
+function normalizeEmail(e){
+  let [l, d] = e.split('@');
+  const n = l.replace(/\+.*$/,'');
+  if(n) l = n;
+  if(d === 'gmail.com' || d === 'googlemail.com') l = l.replace(/\./g,'') || l;
+  return l + '@' + d;
+}
+document.getElementById('clearCacheBtn').addEventListener('click', async ()=>{
+  dnsCache.clear();
+  const db = await idb();
+  try{ if(db) db.transaction('d','readwrite').objectStore('d').clear(); }catch(e){}
+  document.getElementById('topStat').textContent = 'DNS cache cleared';
+});
+document.getElementById('stopBtn').addEventListener('click', ()=>{ stopFlag = true; });
+document.getElementById('exportRulesBtn').addEventListener('click', ()=>downloadText('mail-sorter-rules.json', JSON.stringify(rules, null, 2)));
+document.getElementById('importRulesBtn').addEventListener('click', ()=>document.getElementById('importRulesFile').click());
+document.getElementById('importRulesFile').addEventListener('change', async e=>{
+  const f = e.target.files[0]; e.target.value = '';
+  if(!f) return;
+  try{
+    const obj = JSON.parse(await f.text());
+    if(!obj || typeof obj !== 'object' || !Object.values(obj).every(Array.isArray)) throw new Error('bad format');
+    rules = obj; renderRules();
+  }catch(err){ alert('Could not import rules: expected a JSON object of provider → list of patterns.'); }
+});
+document.getElementById('testRuleBtn').addEventListener('click', async ()=>{
+  const d = document.getElementById('testDomain').value.trim().toLowerCase().replace(/^.*@/,'');
+  const out = document.getElementById('testResult');
+  if(!d) return;
+  out.textContent = 'Checking…';
+  const [ns, mx] = await Promise.all([resolveDNS(d,'NS'), resolveDNS(d,'MX')]);
+  if(ns === null && mx === null){ out.textContent = 'Lookup failed'; return; }
+  let [p, m] = classify(d, ns||[], mx||[], []);
+  if(!p) [p, m] = classify(d, ns||[], mx||[], (await resolveDNS(d,'TXT')) || []);
+  out.textContent = (p ? `${p} (via ${m})` : 'No rule matches') + ' · MX: ' + ((mx||[]).map(mxHostname).join(', ') || 'none');
+});
+const CAP = 300;
+function addAll(groups, key, list){ const g = (groups[key] ||= []); for(const e of list) g.push(e); }
+const FAST_HINTS = {
+  'gmail.com':'gmail-smtp-in.l.google.com', 'googlemail.com':'gmail-smtp-in.l.google.com',
+  'outlook.com':'mail.protection.outlook.com', 'hotmail.com':'mail.protection.outlook.com', 'live.com':'mail.protection.outlook.com', 'msn.com':'mail.protection.outlook.com', 'hotmail.co.uk':'mail.protection.outlook.com',
+  'yahoo.com':'mta5.am0.yahoodns.net', 'yahoo.co.uk':'mta5.am0.yahoodns.net', 'yahoo.co.za':'mta5.am0.yahoodns.net', 'ymail.com':'mta5.am0.yahoodns.net', 'rocketmail.com':'mta5.am0.yahoodns.net', 'aol.com':'mx-aol.mail.gm0.yahoodns.net',
+  'icloud.com':'mx01.mail.icloud.com', 'me.com':'mx01.mail.icloud.com', 'mac.com':'mx01.mail.icloud.com'
+};
+document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
+  const q = v => `"${String(v == null ? '' : v).replace(/"/g,'""')}"`;
+  const rows = ['email,domain,tld,group,provider,webmail,method,mx_host,note'];
+  Object.entries(lastGroups).forEach(([name, list])=>list.forEach(e=>{
+    const d = e.split('@')[1], i = lastDomainInfo[d] || {};
+    rows.push([e, d, d.split('.').pop(), groupOf(name), name, i.webmail || '', i.method || '', (i.mx || [])[0] || '', lastMeta[e] || ''].map(q).join(','));
+  }));
+  downloadText('sorted-emails.csv', rows.join('\n'));
+});
+document.getElementById('downloadXlsxBtn').addEventListener('click', ()=>{
+  const wb = XLSX.utils.book_new(), used = new Set(['summary']), entries = Object.entries(lastGroups).sort((a,b)=> opt('optGroups') ? groupOf(a[0]).localeCompare(groupOf(b[0])) : 0);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Group','Provider','Emails'], ...entries.map(([n,l])=>[groupOf(n), n, l.length])]), 'Summary');
+  entries.forEach(([name, list])=>{
+    const base = name.replace(/[\[\]:*?\/\\]/g,'').slice(0,26) || 'Sheet';
+    let k = base, i = 2;
+    while(used.has(k.toLowerCase())) k = base + '_' + i++;
+    used.add(k.toLowerCase());
+    const rows = [['Email','Domain'], ...list.slice(0, 1000000).map(e=>[e, e.split('@')[1]])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), k);
+  });
+  XLSX.writeFile(wb, 'sorted-emails.xlsx');
+});
+let filterTimer;
+document.getElementById('filterInput').addEventListener('input', e=>{
+  clearTimeout(filterTimer);
+  const q = e.target.value.trim().toLowerCase();
+  filterTimer = setTimeout(()=>renderFolders(lastGroups, q), 150);
+});
+document.getElementById('resetRulesBtn').addEventListener('click', ()=>{
+  rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+  renderRules();
+  try{ localStorage.removeItem('hostSorterRules'); }catch(e){}
+});
+
+// ---------- History ----------
+let memoryHistory = [];
+let storageOK = true;
+try{ localStorage.setItem('__test__','1'); localStorage.removeItem('__test__'); }catch(e){ storageOK = false; }
+
+function loadHistory(){
+  if(!storageOK) return memoryHistory;
+  try{ return JSON.parse(localStorage.getItem('hostSorterHistory') || '[]'); }
+  catch(e){ return []; }
+}
+function saveHistoryEntry(entry){
+  const hist = loadHistory();
+  hist.unshift(entry);
+  if(hist.length > 30) hist.length = 30;
+  if(storageOK){
+    try{ localStorage.setItem('hostSorterHistory', JSON.stringify(hist)); }
+    catch(e){ storageOK = false; memoryHistory = hist; }
+  } else { memoryHistory = hist; }
+  renderHistory();
+}
+function deleteHistoryEntry(id){
+  const hist = loadHistory().filter(h=>h.id !== id);
+  if(storageOK){ try{ localStorage.setItem('hostSorterHistory', JSON.stringify(hist)); }catch(e){} }
+  else { memoryHistory = hist; }
+  renderHistory();
+}
+function clearAllHistory(){
+  if(storageOK){ try{ localStorage.removeItem('hostSorterHistory'); }catch(e){} }
+  memoryHistory = [];
+  renderHistory();
+}
+function renderHistory(){
+  const el = document.getElementById('historyList');
+  const hist = loadHistory();
+  if(hist.length === 0){
+    el.innerHTML = '<div class="empty">No previous sorts saved yet — completed sorts save here automatically.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  hist.forEach(entry=>{
+    const row = document.createElement('div');
+    row.className = 'history-row';
+    const date = new Date(entry.timestamp);
+    row.innerHTML = `
+      <div class="history-meta"><b>${date.toLocaleString()}</b> — ${entry.emailCount} emails, ${entry.domainCount} domains, ${entry.hostCount} matched</div>
+      <div class="history-actions">
+        <button class="ghost sm history-dl" data-id="${entry.id}">Download ZIP</button>
+        <button class="ghost sm history-del" data-id="${entry.id}">Delete</button>
+      </div>
+    `;
+    el.appendChild(row);
+  });
+  el.querySelectorAll('.history-dl').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const entry = loadHistory().find(h=>h.id === btn.dataset.id);
+      if(!entry) return;
+      const zip = new JSZip();
+      Object.entries(entry.groups).forEach(([name, list])=>{
+        zip.file(slugify(name) + '.txt', list.join('\n'));
+      });
+      const blob = await zip.generateAsync({type:'blob'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `sorted-emails-${entry.id}.zip`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  });
+  el.querySelectorAll('.history-del').forEach(btn=>{
+    btn.addEventListener('click', ()=> deleteHistoryEntry(btn.dataset.id));
+  });
+}
+document.getElementById('clearHistoryBtn').addEventListener('click', clearAllHistory);
+renderHistory();
+</script>
+</body>
+</html>
