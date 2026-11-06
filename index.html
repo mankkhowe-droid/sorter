@@ -203,6 +203,7 @@ paste a messy list — valid addresses are extracted automatically"></textarea>
           <label><input type="checkbox" id="optTld"> Split folders by country (TLD)</label>
           <label><input type="checkbox" id="optGroups"> Group exports (Big providers / Gateways / Hosts…)</label>
           <label><input type="checkbox" id="optWebmail"> Detect webmail platform (OWA, Roundcube, WebAccess…)</label>
+          <label><input type="checkbox" id="optPlatformFolders" checked> One folder per platform (all Roundcube together, all OWA together…)</label>
           <input type="text" id="probeUrl" value="/api/webmail-probe" title="URL of the webmail probe (/api/webmail-probe on Vercel, or the full address of webmail-probe.php)">
           <button class="ghost sm" id="clearCacheBtn">Clear DNS cache</button>
         </div>
@@ -652,9 +653,9 @@ document.getElementById('sortBtn').addEventListener('click', async ()=>{
       addAll(groups, 'Lookup failed', list);
       failedCount += list.length;
     } else if(info.provider){
-      addAll(groups, tagTld(tagWeb(info.provider, info), domain), list);
+      addAll(groups, tagTld(folderName(info.provider, info), domain), list);
     } else {
-      addAll(groups, tagWeb('Unclassified', info), list);
+      addAll(groups, folderName('Unclassified', info), list);
       unclassifiedCount += list.length;
     }
   });
@@ -889,6 +890,7 @@ const GROUPS = {
   'Big providers': ['Microsoft 365 / Outlook','Google Workspace / Gmail','Gmail (personal)','Google Workspace (custom domain)','Yahoo Mail','Apple iCloud Mail'],
   'Gateways': ['Mimecast','Proofpoint','Barracuda'],
   'Privacy and other mail services': ['Proton Mail','Zoho Mail','Fastmail','Titan Email','Rackspace Email','Namecheap Private Email','Cloudflare Email Routing'],
+  'Webmail platforms': ['OWA (Exchange)','Microsoft 365 (OWA)','GroupWise WebAccess','Roundcube','SquirrelMail','Horde','Zimbra','SOGo','cPanel Webmail','SnappyMail','RainLoop','AfterLogic','IceWarp','Kerio Connect','MDaemon WorldClient','MailEnable','Titan Webmail'],
   'Validity issues': ['Typos (fix suggested)','Disposable domains','Role addresses'],
   'Unsorted': ['Unclassified','Lookup failed','Not checked (stopped)']
 };
@@ -902,6 +904,10 @@ const PERSONAL_GOOGLE = new Set(['gmail.com','googlemail.com']);
 function splitGoogle(provider, domain){  // @gmail.com apart from custom domains hosted on Google Workspace
   if(!provider || provider !== matchRules('gmail-smtp-in.l.google.com')) return provider;
   return PERSONAL_GOOGLE.has(domain) ? 'Gmail (personal)' : 'Google Workspace (custom domain)';
+}
+function folderName(name, info){  // detected platform wins over host/provider when the option is on
+  if(info && info.webmail && opt('optPlatformFolders')) return info.webmail;
+  return tagWeb(name, info);
 }
 function tagWeb(name, info){ return (info && info.webmail) ? `${name} · ${info.webmail}` : name; }
 let probeActive = 0; const probeQ = [];
@@ -980,7 +986,7 @@ document.getElementById('downloadCsvBtn').addEventListener('click', ()=>{
   const rows = ['email,domain,tld,group,provider,webmail,method,mx_host,note'];
   Object.entries(lastGroups).forEach(([name, list])=>list.forEach(e=>{
     const d = e.split('@')[1], i = lastDomainInfo[d] || {};
-    rows.push([e, d, d.split('.').pop(), groupOf(name), name, i.webmail || '', i.method || '', (i.mx || [])[0] || '', lastMeta[e] || ''].map(q).join(','));
+    rows.push([e, d, d.split('.').pop(), groupOf(name), (i.provider || name), i.webmail || '', i.method || '', (i.mx || [])[0] || '', lastMeta[e] || ''].map(q).join(','));
   }));
   downloadText('sorted-emails.csv', rows.join('\n'));
 });
